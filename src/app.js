@@ -1,3 +1,5 @@
+// require('dotenv').config({path: `.env.${process.env.NODE_ENV}`});
+require('dotenv').config({ path: `.env.${process.env.NODE_ENV}` }); 
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -54,13 +56,16 @@ app.get('/', (req, res) => res.send('Chat API running'));
 // Socket.io setup
 require('./controllers/socketController')(io);
 
-
-// Sync DB and start server
+// Test DB connection, then sync and start server
 const PORT = process.env.PORT || 8000;
-sequelize.sync()
+sequelize.authenticate()
+  .then(() => {
+    console.log('Database connection established.');
+    return sequelize.sync();
+  })
   .then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
   })
   .catch((err) => {
-    console.error('Failed to sync database:', err);
+    console.error('Unable to connect to the database:', err);
   });
