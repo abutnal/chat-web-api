@@ -11,9 +11,5 @@
             "src": "/(.*)",
             "dest": "app.js"
         }
-    ],
-    "regions": [
-        "all"
-    ],
-    "alias": "chat-web-api"
+    ]
 }
