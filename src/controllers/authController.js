@@ -15,6 +15,16 @@ exports.signup = async (req, res) => {
     }
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, password: hash, profile_image });
+    // Emit user_list_updated event to all clients
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image'] });
+        io.emit('user_list_updated', users);
+      }
+    } catch (e) {
+      // Ignore socket errors
+    }
     res.status(201).json({ id: user.id, name: user.name, email: user.email, profile_image: user.profile_image });
   } catch (err) {
     res.status(500).json({ message: 'Signup failed', error: err.message });
