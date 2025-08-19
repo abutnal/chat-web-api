@@ -33,6 +33,7 @@ const authRoutes = require('./routes/auth');
 const messageRoutes = require('./routes/message');
 const uploadRoutes = require('./routes/upload');
 const userRoutes = require('./routes/user');
+const callRoutes = require('./routes/call');
 
 
 // Static file serving for uploads
@@ -44,6 +45,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/calls', callRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {

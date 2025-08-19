@@ -96,6 +96,73 @@ module.exports = (io) => {
       io.to(String(to)).emit('typing', { from, to });
     });
 
+    // WebRTC signaling events for video/audio calls
+    socket.on('call_offer', ({ to, from, offer, callType }) => {
+      io.to(String(to)).emit('call_offer', { from, offer, callType });
+      // Store callType in socket for later use in call_end
+      socket.currentCallType = callType;
+      socket.callStartedAt = new Date();
+      socket.callAnswered = false;
+    });
+
+    socket.on('call_answer', ({ to, from, answer }) => {
+      io.to(String(to)).emit('call_answer', { from, answer });
+      // Mark call as answered
+      socket.callAnswered = true;
+    });
+
+    socket.on('ice_candidate', ({ to, from, candidate }) => {
+      io.to(String(to)).emit('ice_candidate', { from, candidate });
+    });
+
+    socket.on('call_reject', ({ to, from }) => {
+      io.to(String(to)).emit('call_reject', { from });
+      // Save missed call to DB
+      const Call = require('../models/call');
+      const callType = socket.currentCallType || 'audio';
+      const started_at = socket.callStartedAt || new Date();
+      const ended_at = new Date();
+      Call.create({
+        caller_id: from,
+        receiver_id: to,
+        type: callType,
+        duration: 0,
+        started_at,
+        ended_at,
+        status: 'missed'
+      }).catch(err => {
+        console.error('Error saving missed call:', err);
+      });
+    });
+
+    socket.on('call_end', ({ to, from, duration }) => {
+      io.to(String(to)).emit('call_end', { from, duration });
+      // Save call history to DB
+      const Call = require('../models/call');
+      // Get callType from socket data (store in socket during call_offer)
+      const callType = socket.currentCallType || 'audio';
+      const started_at = socket.callStartedAt || new Date();
+      const ended_at = new Date();
+      // If call was never answered, mark as missed
+      const status = socket.callAnswered ? 'completed' : 'missed';
+      Call.create({
+        caller_id: from,
+        receiver_id: to,
+        type: callType,
+        duration: typeof duration !== 'undefined' && status === 'completed' ? duration : 0,
+        started_at,
+        ended_at,
+        status
+      }).catch(err => {
+        console.error('Error saving call history:', err);
+      });
+    });
+
+    // Incoming call notification
+    socket.on('incoming_call', ({ to, from, callType }) => {
+      io.to(String(to)).emit('incoming_call', { from, callType });
+    });
+
     socket.on('disconnect', () => {
       if (socket.userId) {
         onlineUsers.delete(socket.userId);
