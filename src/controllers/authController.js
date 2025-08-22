@@ -11,7 +11,20 @@ exports.signup = async (req, res) => {
     if (existing) return res.status(409).json({ message: 'Email already exists' });
     let profile_image = null;
     if (req.file) {
-      profile_image = `/uploads/${req.file.filename}`;
+      // Upload image to Supabase
+      const supabase = require('../utils/supabase');
+      const bucket = process.env.SUPABASE_BUCKET;
+      const fs = require('fs');
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const fileName = req.file.filename;
+      const { data, error } = await supabase.storage.from(bucket).upload(fileName, fileBuffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+      if (error) return res.status(500).json({ message: 'Supabase upload failed', error: error.message });
+      // Get public URL
+      const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
+      profile_image = publicUrlData.publicUrl;
     }
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, password: hash, profile_image });

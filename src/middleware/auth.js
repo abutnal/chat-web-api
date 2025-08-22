@@ -3,8 +3,10 @@ const config = require('../config');
 
 module.exports = (req, res, next) => {
   const authHeader = req.headers['authorization'];
+  // console.log('Authorization header:', authHeader);
   if (!authHeader) return res.status(401).json({ message: 'No token provided' });
   const token = authHeader.split(' ')[1];
+  // console.log('Extracted token:', token);
   if (!token) return res.status(401).json({ message: 'No token provided' });
   // Debug log: print JWT secret and received token
   try {

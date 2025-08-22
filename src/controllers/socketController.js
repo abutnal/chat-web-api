@@ -96,6 +96,12 @@ module.exports = (io) => {
       io.to(String(to)).emit('typing', { from, to });
     });
 
+    // ZEGOCLOUD call invite relay
+    socket.on('call:invite', ({ from, to }) => {
+        console.log('[SocketServer] call:invite received:', { from, to });
+        io.to(String(to)).emit('call:invite', { from, to });
+    });
+
     // WebRTC signaling events for video/audio calls
     socket.on('call_offer', ({ to, from, offer, callType }) => {
       io.to(String(to)).emit('call_offer', { from, offer, callType });
