@@ -1,5 +1,5 @@
 // require('dotenv').config({path: `.env.${process.env.NODE_ENV}`});
-require('dotenv').config({ path: `.env.${process.env.NODE_ENV}` }); 
+require('dotenv').config({ path: `.env.${process.env.NODE_ENV}` });
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
