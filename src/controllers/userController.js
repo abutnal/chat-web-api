@@ -30,13 +30,42 @@ const User = require('../models/user');
 const { Op } = require('sequelize');
 
 // Get all users except the current user
+const Message = require('../models/message');
+
 exports.getAllUsers = async (req, res) => {
   try {
+    // Get all users except the current user
     const users = await User.findAll({
       where: { id: { [Op.ne]: req.user.id } },
       attributes: ['id', 'name', 'email', 'profile_image'],
     });
-    res.json(users);
+
+    // For each user, get the latest message timestamp exchanged with the logged-in user
+    const usersWithLatestMessage = await Promise.all(users.map(async (user) => {
+      const latestMessage = await Message.findOne({
+        where: {
+          [Op.or]: [
+            { sender_id: req.user.id, receiver_id: user.id },
+            { sender_id: user.id, receiver_id: req.user.id }
+          ]
+        },
+        order: [['createdAt', 'DESC']],
+      });
+      return {
+        ...user.toJSON(),
+        latestMessageTimestamp: latestMessage ? latestMessage.createdAt : null
+      };
+    }));
+
+    // Sort users by latestMessageTimestamp (descending), users with no messages go last
+    usersWithLatestMessage.sort((a, b) => {
+      if (!a.latestMessageTimestamp && !b.latestMessageTimestamp) return 0;
+      if (!a.latestMessageTimestamp) return 1;
+      if (!b.latestMessageTimestamp) return -1;
+      return new Date(b.latestMessageTimestamp) - new Date(a.latestMessageTimestamp);
+    });
+
+    res.json(usersWithLatestMessage);
   } catch (err) {
     res.status(500).json({ message: 'Get users failed', error: err.message });
   }
