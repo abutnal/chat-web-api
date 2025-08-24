@@ -7,6 +7,7 @@ const User = sequelize.define('User', {
   email: { type: DataTypes.STRING, allowNull: false, unique: true },
   password: { type: DataTypes.STRING, allowNull: false },
   profile_image: { type: DataTypes.STRING },
+  status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'offline' }, // online/offline
 }, {
   timestamps: true,
   tableName: 'users',

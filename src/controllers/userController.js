@@ -37,7 +37,7 @@ exports.getAllUsers = async (req, res) => {
     // Get all users except the current user
     const users = await User.findAll({
       where: { id: { [Op.ne]: req.user.id } },
-      attributes: ['id', 'name', 'email', 'profile_image'],
+      attributes: ['id', 'name', 'email', 'profile_image', 'status'],
     });
 
     // For each user, get the latest message timestamp exchanged with the logged-in user

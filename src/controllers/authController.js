@@ -51,9 +51,44 @@ exports.login = async (req, res) => {
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Invalid credentials' });
+    // Set user status to online
+    user.status = 'online';
+    await user.save();
     const token = jwt.sign({ id: user.id, email: user.email }, config.jwtSecret, { expiresIn: '1d' });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, profile_image: user.profile_image } });
+    // Emit user_list_updated event to all clients for real-time update
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+        io.emit('user_list_updated', users);
+      }
+    } catch (e) {
+      // Ignore socket errors
+    }
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, profile_image: user.profile_image, status: user.status } });
   } catch (err) {
     res.status(500).json({ message: 'Login failed', error: err.message });
+  }
+}
+// Logout: set user status to offline
+exports.logout = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.status = 'offline';
+    await user.save();
+    // Emit user_list_updated event to all clients for real-time update
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+        io.emit('user_list_updated', users);
+      }
+    } catch (e) {
+      // Ignore socket errors
+    }
+    res.json({ message: 'Logged out', status: user.status });
+  } catch (err) {
+    res.status(500).json({ message: 'Logout failed', error: err.message });
   }
 };

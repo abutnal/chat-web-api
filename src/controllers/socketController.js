@@ -1,8 +1,11 @@
 const Message = require('../models/message');
 
 module.exports = (io) => {
-  // Track online users
-  const onlineUsers = new Set();
+  // Robust online user tracking: userId -> Set of socket IDs
+  const userSockets = new Map();
+  function broadcastOnlineUsers() {
+    io.emit('online_users', Array.from(userSockets.keys()));
+  }
 
   io.on('connection', (socket) => {
     // Clear chat for sender
@@ -30,9 +33,12 @@ module.exports = (io) => {
     socket.on('join', (userId) => {
       socket.userId = userId;
       socket.join(String(userId));
-      onlineUsers.add(userId);
-      // Broadcast updated online users to all clients
-      io.emit('online_users', Array.from(onlineUsers));
+      // Add socket.id to user's set
+      if (!userSockets.has(userId)) {
+        userSockets.set(userId, new Set());
+      }
+      userSockets.get(userId).add(socket.id);
+      broadcastOnlineUsers();
     });
 
     // Handle sending a message
@@ -170,9 +176,13 @@ module.exports = (io) => {
     });
 
     socket.on('disconnect', () => {
-      if (socket.userId) {
-        onlineUsers.delete(socket.userId);
-        io.emit('online_users', Array.from(onlineUsers));
+      if (socket.userId && userSockets.has(socket.userId)) {
+        const sockets = userSockets.get(socket.userId);
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          userSockets.delete(socket.userId);
+        }
+        broadcastOnlineUsers();
       }
     });
   });
