@@ -30,7 +30,7 @@ module.exports = (io) => {
       io.to(String(userId)).emit('chat_cleared', { otherUserId });
     });
     // Store userId for this socket
-    socket.on('join', (userId) => {
+    socket.on('join', async (userId) => {
       socket.userId = userId;
       socket.join(String(userId));
       // Add socket.id to user's set
@@ -38,6 +38,20 @@ module.exports = (io) => {
         userSockets.set(userId, new Set());
       }
       userSockets.get(userId).add(socket.id);
+      // Set user status to online in DB
+      try {
+        const User = require('../models/user');
+        const user = await User.findByPk(userId);
+        if (user) {
+          user.status = 'online';
+          await user.save();
+        }
+        // Emit user_list_updated to all clients
+        const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+        io.emit('user_list_updated', users);
+      } catch (err) {
+        console.error('Error setting user online on join:', err);
+      }
       broadcastOnlineUsers();
     });
 
@@ -175,12 +189,26 @@ module.exports = (io) => {
       io.to(String(to)).emit('incoming_call', { from, callType });
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       if (socket.userId && userSockets.has(socket.userId)) {
         const sockets = userSockets.get(socket.userId);
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           userSockets.delete(socket.userId);
+          // Set user status to offline in DB
+          try {
+            const User = require('../models/user');
+            const user = await User.findByPk(socket.userId);
+            if (user) {
+              user.status = 'offline';
+              await user.save();
+            }
+            // Emit user_list_updated to all clients
+            const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+            io.emit('user_list_updated', users);
+          } catch (err) {
+            console.error('Error setting user offline on disconnect:', err);
+          }
         }
         broadcastOnlineUsers();
       }

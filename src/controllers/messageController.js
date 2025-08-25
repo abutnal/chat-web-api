@@ -35,16 +35,28 @@ exports.sendMessage = async (req, res) => {
 exports.getMessages = async (req, res) => {
   try {
     const { userId } = req.params;
-    const messages = await Message.findAll({
-      where: {
-        [Op.or]: [
-          { sender_id: req.user.id, receiver_id: userId },
-          { sender_id: userId, receiver_id: req.user.id }
-        ]
-      },
-      order: [['createdAt', 'ASC']]
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const where = {
+      [Op.or]: [
+        { sender_id: req.user.id, receiver_id: userId },
+        { sender_id: userId, receiver_id: req.user.id }
+      ]
+    };
+    console.log('Fetching messages with params:', { userId, limit, offset, where });
+    // First, get total count
+    const count = await Message.count({ where });
+    // Calculate correct offset from the end for latest messages
+    let realOffset = count - limit - offset;
+    if (realOffset < 0) realOffset = 0;
+    const rows = await Message.findAll({
+      where,
+      order: [['createdAt', 'ASC']],
+      limit,
+      offset: realOffset
     });
-    res.json(messages);
+    // Return messages in chronological order (oldest at top)
+    res.json({ total: count, messages: rows.reverse() });
   } catch (err) {
     res.status(500).json({ message: 'Get messages failed', error: err.message });
   }
@@ -69,16 +81,16 @@ exports.deleteMessage = async (req, res) => {
     const { forEveryone } = req.body;
     const message = await Message.findByPk(messageId);
     if (!message) return res.status(404).json({ message: 'Message not found' });
-        // Only sender can delete for everyone
-        if (forEveryone) {
-            if (message.sender_id !== req.user.id) {
-                return res.status(403).json({ message: 'Only sender can delete for everyone' });
-            }
-            await message.destroy();
-           // Emit socket event for delete for everyone
-           req.app.get('io').to(String(message.sender_id)).emit('message_deleted', { messageId });
-           req.app.get('io').to(String(message.receiver_id)).emit('message_deleted', { messageId });
-            return res.json({ message: 'Message deleted for everyone' });
+    // Only sender can delete for everyone
+    if (forEveryone) {
+      if (message.sender_id !== req.user.id) {
+        return res.status(403).json({ message: 'Only sender can delete for everyone' });
+      }
+      await message.destroy();
+      // Emit socket event for delete for everyone
+      req.app.get('io').to(String(message.sender_id)).emit('message_deleted', { messageId });
+      req.app.get('io').to(String(message.receiver_id)).emit('message_deleted', { messageId });
+      return res.json({ message: 'Message deleted for everyone' });
     } else {
       // Mark as deleted for this user
       let deletedFor = message.deleted_for ? message.deleted_for.split(',') : [];
@@ -86,8 +98,8 @@ exports.deleteMessage = async (req, res) => {
         deletedFor.push(String(req.user.id));
         message.deleted_for = deletedFor.join(',');
         await message.save();
-       // Emit socket event for delete for me
-       req.app.get('io').to(String(req.user.id)).emit('message_deleted', { messageId });
+        // Emit socket event for delete for me
+        req.app.get('io').to(String(req.user.id)).emit('message_deleted', { messageId });
       }
       return res.json({ message: 'Deleted for me' });
     }
@@ -111,9 +123,9 @@ exports.editMessage = async (req, res) => {
     }
     message.content = content;
     await message.save();
-   // Emit socket event for edit
-   req.app.get('io').to(String(message.sender_id)).emit('message_edited', { message });
-   req.app.get('io').to(String(message.receiver_id)).emit('message_edited', { message });
+    // Emit socket event for edit
+    req.app.get('io').to(String(message.sender_id)).emit('message_edited', { message });
+    req.app.get('io').to(String(message.receiver_id)).emit('message_edited', { message });
     res.json(message);
   } catch (err) {
     res.status(500).json({ message: 'Edit message failed', error: err.message });
