@@ -46,6 +46,7 @@ exports.signup = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
+    
     const { email, password } = req.body;
     const user = await User.findOne({ where: { email } });
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
@@ -73,22 +74,27 @@ exports.login = async (req, res) => {
 // Logout: set user status to offline
 exports.logout = async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    user.status = 'offline';
-    await user.save();
-    // Emit user_list_updated event to all clients for real-time update
-    try {
-      const io = req.app.get('io');
-      if (io) {
-        const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
-        io.emit('user_list_updated', users);
+    if (req.user && req.user.id) {
+      const user = await User.findByPk(req.user.id);
+      if (user) {
+        user.status = 'offline';
+        await user.save();
+        // Emit user_list_updated event to all clients for real-time update
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+            io.emit('user_list_updated', users);
+          }
+        } catch (e) {
+          // Ignore socket errors
+        }
       }
-    } catch (e) {
-      // Ignore socket errors
     }
-    res.json({ message: 'Logged out', status: user.status });
+    // Always return success, even if user not found or token invalid/expired
+    res.json({ message: 'Logged out' });
   } catch (err) {
-    res.status(500).json({ message: 'Logout failed', error: err.message });
+    // Always return success for logout, even on error
+    res.json({ message: 'Logged out' });
   }
 };
