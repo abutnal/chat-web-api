@@ -1,4 +1,5 @@
 const Message = require('../models/message');
+const MyUser = require('../models/myUser'); // Import MyUser model
 
 module.exports = (io) => {
   // Robust online user tracking: userId -> Set of socket IDs
@@ -65,9 +66,30 @@ module.exports = (io) => {
         file_url: data.file_url,
         status: 'sent',
       });
+
+      // Auto-add sender to receiver's list if not present
+      if (data.sender_id !== data.receiver_id) {
+        try {
+          const exists = await MyUser.findOne({ where: { ownerId: data.receiver_id, userId: data.sender_id } });
+          if (!exists) {
+            await MyUser.create({ ownerId: data.receiver_id, userId: data.sender_id });
+            console.log('Auto-added sender to receiver list (socket):', data.sender_id, '->', data.receiver_id);
+
+            // Emit event to receiver to refresh their user list
+            io.to(String(data.receiver_id)).emit('user_list_updated');
+          }
+        } catch (e) {
+          console.error('Auto-add MyUser error (socket):', e);
+        }
+      }
+
       // Emit to receiver and sender
       io.to(String(data.receiver_id)).emit('receive_message', message);
       io.to(String(data.sender_id)).emit('receive_message', message);
+
+      // Emit user_list_updated to both sender and receiver for real-time sorting
+      io.to(String(data.receiver_id)).emit('user_list_updated');
+      io.to(String(data.sender_id)).emit('user_list_updated');
     });
 
     // Handle message read

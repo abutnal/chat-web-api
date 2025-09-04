@@ -1,21 +1,34 @@
-const Message = require('../models/message');
-const User = require('../models/user');
+const { MyUser, Message } = require('../models');
 const { Op } = require('sequelize');
 
 exports.sendMessage = async (req, res) => {
   try {
-    const { receiver_id, content, file_url } = req.body;
-    if (!receiver_id || (!content && !file_url)) return res.status(400).json({ message: 'Message content or file required' });
+    const { receiver_id, content } = req.body;
+    const senderId = req.user.id;
+    if (!receiver_id || !content) return res.status(400).json({ message: 'Message content required' });
 
-    // file_url should be the public URL from Supabase (or other storage)
-    // If file_url is present, store it in the messages table
+    // Save message
     const message = await Message.create({
-      sender_id: req.user.id,
+      sender_id: senderId,
       receiver_id,
       content,
-      file_url: file_url || null,
-      status: 'sent',
+      status: 'sent' // <-- use status, not read
     });
+
+    // Auto-add sender to receiver's list if not present
+    
+    if (senderId !== receiver_id) {
+      const exists = await MyUser.findOne({ where: { ownerId: receiver_id, userId: senderId } });
+      if (!exists) {
+        try {
+          await MyUser.create({ ownerId: receiver_id, userId: senderId });
+          console.log('Auto-added sender to receiver list:', senderId, '->', receiver_id);
+        } catch (e) {
+          console.error('Auto-add MyUser error:', e);
+        }
+      }
+    }
+
     // Emit the new message to receiver for real-time update
     try {
       const io = req.app.get('io');
@@ -32,6 +45,7 @@ exports.sendMessage = async (req, res) => {
   }
 };
 
+
 exports.getMessages = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -43,7 +57,7 @@ exports.getMessages = async (req, res) => {
         { sender_id: userId, receiver_id: req.user.id }
       ]
     };
-    console.log('Fetching messages with params:', { userId, limit, offset, where });
+    // console.log('Fetching messages with params:', { userId, limit, offset, where });
     // First, get total count
     const count = await Message.count({ where });
     // Calculate correct offset from the end for latest messages
@@ -72,6 +86,38 @@ exports.markAsRead = async (req, res) => {
     res.json(message);
   } catch (err) {
     res.status(500).json({ message: 'Mark as read failed', error: err.message });
+  }
+};
+
+exports.markAllAsRead = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const updated = await Message.update(
+      { status: 'read' },
+      {
+        where: {
+          sender_id: userId,
+          receiver_id: req.user.id,
+          status: 'sent'
+        }
+      }
+    );
+    // Find all affected messages
+    const messages = await Message.findAll({
+      where: {
+        sender_id: userId,
+        receiver_id: req.user.id,
+        status: 'read'
+      }
+    });
+    // Emit socket event for each message
+    const io = req.app.get('io');
+    messages.forEach(msg => {
+      io.to(String(msg.sender_id)).emit('message_read', { messageId: msg.id });
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Mark all as read failed', error: err.message });
   }
 };
 

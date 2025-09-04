@@ -33,6 +33,7 @@ const authRoutes = require('./routes/auth');
 const messageRoutes = require('./routes/message');
 const uploadRoutes = require('./routes/upload');
 const userRoutes = require('./routes/user');
+const myUserRoutes = require('./routes/myUser');
 const callRoutes = require('./routes/call');
 const xirsysRoutes = require('./routes/xirsys');
 
@@ -46,6 +47,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/my-users', myUserRoutes);
 app.use('/api/calls', callRoutes);
 app.use('/api/xirsys', xirsysRoutes);
 

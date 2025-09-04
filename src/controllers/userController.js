@@ -70,3 +70,21 @@ exports.getAllUsers = async (req, res) => {
     res.status(500).json({ message: 'Get users failed', error: err.message });
   }
 };
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const { search = '', limit = 20, offset = 0 } = req.query;
+    const users = await User.findAll({
+      where: {
+        name: { [Op.like]: `%${search}%` } // <-- Use Op.like for MySQL
+      },
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      attributes: ['id', 'name', 'profile_image', 'status']
+    });
+    res.json(users);
+  } catch (err) {
+    console.error('User search error:', err);
+    res.status(500).json({ message: 'User search failed', error: err.message });
+  }
+};
