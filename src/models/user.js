@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../utils/db');
+const bcrypt = require('bcrypt');
 
 const User = sequelize.define('User', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -12,5 +13,9 @@ const User = sequelize.define('User', {
   timestamps: true,
   tableName: 'users',
 });
+
+User.prototype.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
 module.exports = User;

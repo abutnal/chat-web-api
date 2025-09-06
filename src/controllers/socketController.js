@@ -1,5 +1,6 @@
 const Message = require('../models/message');
 const MyUser = require('../models/myUser'); // Import MyUser model
+const BlockedUser = require('../models/blockedUser');
 
 module.exports = (io) => {
   // Robust online user tracking: userId -> Set of socket IDs
@@ -58,6 +59,16 @@ module.exports = (io) => {
 
     // Handle sending a message
     socket.on('send_message', async (data) => {
+      // Check if receiver has blocked sender
+      const isBlocked = await BlockedUser.findOne({
+        where: { blocker_id: data.receiver_id, blocked_id: data.sender_id }
+      });
+      if (isBlocked) {
+        // Optionally emit an error to sender
+        io.to(String(data.sender_id)).emit('message_blocked', { receiver_id: data.receiver_id });
+        return; // Do not send or save the message
+      }
+
       // data: { sender_id, receiver_id, content, file_url }
       const message = await Message.create({
         sender_id: data.sender_id,
@@ -73,7 +84,6 @@ module.exports = (io) => {
           const exists = await MyUser.findOne({ where: { ownerId: data.receiver_id, userId: data.sender_id } });
           if (!exists) {
             await MyUser.create({ ownerId: data.receiver_id, userId: data.sender_id });
-            console.log('Auto-added sender to receiver list (socket):', data.sender_id, '->', data.receiver_id);
 
             // Emit event to receiver to refresh their user list
             io.to(String(data.receiver_id)).emit('user_list_updated');
@@ -140,7 +150,6 @@ module.exports = (io) => {
 
     // ZEGOCLOUD call invite relay
     socket.on('call:invite', ({ from, to }) => {
-        console.log('[SocketServer] call:invite received:', { from, to });
         io.to(String(to)).emit('call:invite', { from, to });
     });
 

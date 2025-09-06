@@ -35,6 +35,7 @@ const uploadRoutes = require('./routes/upload');
 const userRoutes = require('./routes/user');
 const myUserRoutes = require('./routes/myUser');
 const callRoutes = require('./routes/call');
+const blockedUserRoutes = require('./routes/blockedUser');
 const xirsysRoutes = require('./routes/xirsys');
 
 
@@ -50,6 +51,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/my-users', myUserRoutes);
 app.use('/api/calls', callRoutes);
 app.use('/api/xirsys', xirsysRoutes);
+app.use('/api', blockedUserRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -66,11 +68,13 @@ require('./controllers/socketController')(io);
 const PORT = process.env.PORT || 8000;
 sequelize.authenticate()
   .then(() => {
-    console.log('Database connection established.');
+    console.log('Database connection established successfully');
     return sequelize.sync();
   })
   .then(() => {
-    server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
   })
   .catch((err) => {
     console.error('Unable to connect to the database:', err);

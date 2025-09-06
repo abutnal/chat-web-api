@@ -7,9 +7,14 @@ module.exports = {
       allowNull: false,
       defaultValue: "offline"
     });
+    await queryInterface.addColumn('messages', 'read', {
+      type: Sequelize.BOOLEAN,
+      defaultValue: false,
+    });
   },
 
   down: async (queryInterface, Sequelize) => {
     await queryInterface.removeColumn("users", "status");
+    await queryInterface.removeColumn('messages', 'read');
   }
 };

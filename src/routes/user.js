@@ -7,7 +7,7 @@ const auth = require('../middleware/auth');
 router.get('/', auth, userController.getAllUsers);
 router.put('/profile', auth, require('../middleware/upload').single('profile_image'), userController.updateProfile);
 router.get('/search', auth, userController.searchUsers);
-const authController = require('../controllers/authController');
+
 router.post('/logout', async (req, res, next) => {
   let token = null;
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
@@ -31,5 +31,5 @@ router.post('/logout', async (req, res, next) => {
   // Always call the logout controller
   return require('../controllers/authController').logout(req, res, next);
 });
-
+router.post('/change-password', auth, userController.changePassword);
 module.exports = router;

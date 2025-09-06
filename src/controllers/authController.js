@@ -14,9 +14,9 @@ exports.signup = async (req, res) => {
       // Upload image to Supabase
       const supabase = require('../utils/supabase');
       const bucket = process.env.SUPABASE_BUCKET;
-      const fs = require('fs');
-      const fileBuffer = fs.readFileSync(req.file.path);
-      const fileName = req.file.filename;
+      const fileBuffer = req.file.buffer; // Use buffer from memory
+      const fileExt = req.file.originalname.split('.').pop();
+      const fileName = `signup_${Date.now()}.${fileExt}`;
       const { data, error } = await supabase.storage.from(bucket).upload(fileName, fileBuffer, {
         contentType: req.file.mimetype,
         upsert: true,

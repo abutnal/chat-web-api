@@ -22,7 +22,6 @@ exports.sendMessage = async (req, res) => {
       if (!exists) {
         try {
           await MyUser.create({ ownerId: receiver_id, userId: senderId });
-          console.log('Auto-added sender to receiver list:', senderId, '->', receiver_id);
         } catch (e) {
           console.error('Auto-add MyUser error:', e);
         }
@@ -57,7 +56,6 @@ exports.getMessages = async (req, res) => {
         { sender_id: userId, receiver_id: req.user.id }
       ]
     };
-    // console.log('Fetching messages with params:', { userId, limit, offset, where });
     // First, get total count
     const count = await Message.count({ where });
     // Calculate correct offset from the end for latest messages
