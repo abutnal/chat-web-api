@@ -7,6 +7,8 @@ MyUser.belongsTo(User, { foreignKey: 'userId', as: 'User' });
 // If you want to associate ownerId as well, use a different alias:
 MyUser.belongsTo(User, { foreignKey: 'ownerId', as: 'Owner' });
 BlockedUser.belongsTo(User, { as: 'blockedUser', foreignKey: 'blocked_id' });
+// Message reply association
+Message.belongsTo(Message, { as: 'replyTo', foreignKey: 'replyToMessageId' });
 module.exports = {
   User,
   MyUser,

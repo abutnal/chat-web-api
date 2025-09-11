@@ -1,8 +1,10 @@
+
 const express = require('express');
 const router = express.Router();
 const messageController = require('../controllers/messageController');
 const auth = require('../middleware/auth');
 
+router.patch('/view-flag/:userId', auth, messageController.updateMsgViewFlag);
 router.post('/send', auth, messageController.sendMessage);
 router.get('/:userId', auth, messageController.getMessages);
 router.patch('/:messageId/read', auth, messageController.markAsRead);

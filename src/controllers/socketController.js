@@ -9,6 +9,9 @@ module.exports = (io) => {
     io.emit('online_users', Array.from(userSockets.keys()));
   }
 
+  // Store pending tone timeouts by messageId
+  const pendingToneTimeouts = new Map();
+
   io.on('connection', (socket) => {
     // Clear chat for sender
     socket.on('clear_chat', async ({ userId, otherUserId }) => {
@@ -57,6 +60,12 @@ module.exports = (io) => {
       broadcastOnlineUsers();
     });
 
+    // Track user focus/tab state
+    const userFocusState = new Map(); // userId -> { focused: true/false, activeChatUserId: string|null }
+    socket.on('user_status', ({ userId, focused, activeChatUserId }) => {
+      userFocusState.set(userId, { focused, activeChatUserId });
+    });
+
     // Handle sending a message
     socket.on('send_message', async (data) => {
       // Check if receiver has blocked sender
@@ -76,7 +85,36 @@ module.exports = (io) => {
         content: data.content,
         file_url: data.file_url,
         status: 'sent',
+        delete_policy: data.delete_policy || 'never',
+        replyToMessageId: data.replyToMessageId || null,
       });
+
+      // Determine if receiver is focused and in chat with sender
+      const focusInfo = userFocusState.get(String(data.receiver_id));
+      const isReceiverFocused = focusInfo?.focused;
+      const isReceiverInChat = focusInfo?.activeChatUserId == String(data.sender_id);
+
+      // Only emit receive_message for UI (single emit per user)
+      io.to(String(data.receiver_id)).emit('receive_message', message);
+      io.to(String(data.sender_id)).emit('receive_message', message);
+
+      // Play message tone and show unread only for single tick (not delivered/read)
+      if (!isReceiverFocused || !isReceiverInChat) {
+        // Delay tone emission by 300ms
+        const timeout = setTimeout(async () => {
+          // Check if message is delivered or read before playing tone
+          const latest = await Message.findByPk(message.id);
+          if (latest.status === 'sent') {
+            // console.log('[SOCKET] play_message_tone emit for message', message.id, 'to', data.receiver_id);
+            io.to(String(data.receiver_id)).emit('play_message_tone', { messageId: message.id });
+            io.to(String(data.receiver_id)).emit('unread_message', { from: data.sender_id, messageId: message.id });
+          } else {
+            console.log('[SOCKET] play_message_tone skipped for message', message.id, 'status', latest.status);
+          }
+          pendingToneTimeouts.delete(message.id);
+        }, 300);
+        pendingToneTimeouts.set(message.id, timeout);
+      }
 
       // Auto-add sender to receiver's list if not present
       if (data.sender_id !== data.receiver_id) {
@@ -93,33 +131,119 @@ module.exports = (io) => {
         }
       }
 
-      // Emit to receiver and sender
-      io.to(String(data.receiver_id)).emit('receive_message', message);
-      io.to(String(data.sender_id)).emit('receive_message', message);
-
       // Emit user_list_updated to both sender and receiver for real-time sorting
       io.to(String(data.receiver_id)).emit('user_list_updated');
       io.to(String(data.sender_id)).emit('user_list_updated');
     });
 
-    // Handle message read
-    socket.on('read_message', async ({ messageId, userId }) => {
-      const message = await Message.findByPk(messageId);
-      if (message && message.receiver_id == userId) {
-        message.status = 'read';
-        await message.save();
-        io.to(String(message.sender_id)).emit('message_read', { messageId });
+    // Cancel pending tone if delivered or read quickly
+    socket.on('delivered_message', async ({ messageId, userId }) => {
+      if (pendingToneTimeouts.has(messageId)) {
+        clearTimeout(pendingToneTimeouts.get(messageId));
+        pendingToneTimeouts.delete(messageId);
+        // console.log('[SOCKET] play_message_tone cancelled for delivered', messageId);
       }
+      // Only mark as delivered if user is focused and in chat with sender
+      const message = await Message.findByPk(messageId);
+      const focusInfo = userFocusState.get(String(userId));
+      const isReceiverFocused = focusInfo?.focused;
+      const isReceiverInChat = focusInfo?.activeChatUserId == String(message.sender_id);
+      if (
+        message &&
+        message.receiver_id == userId &&
+        message.status !== 'read' &&
+        isReceiverFocused &&
+        isReceiverInChat
+      ) {
+        message.status = 'delivered';
+        await message.save();
+        // console.log('[SOCKET] stop_message_tone emit for delivered', messageId, 'to', message.receiver_id);
+        io.to(String(message.sender_id)).emit('message_delivered', {
+          messageId,
+          sender_id: message.sender_id,
+          receiver_id: message.receiver_id
+        });
+        io.to(String(message.receiver_id)).emit('message_delivered', {
+          messageId,
+          sender_id: message.sender_id,
+          receiver_id: message.receiver_id
+        });
+        // Stop message tone and clear unread for double tick
+        io.to(String(message.receiver_id)).emit('stop_message_tone', { messageId });
+        io.to(String(message.receiver_id)).emit('clear_unread', { from: message.sender_id });
+      } else {
+        console.log('[SOCKET] delivered_message ignored: not focused or not in chat', messageId, userId);
+      }
+    });
+
+    socket.on('read_message', async ({ messageId, userId }) => {
+      if (pendingToneTimeouts.has(messageId)) {
+        clearTimeout(pendingToneTimeouts.get(messageId));
+        pendingToneTimeouts.delete(messageId);
+        console.log('[SOCKET] play_message_tone cancelled for read', messageId);
+      }
+      const message = await Message.findByPk(messageId);
+      // Only allow receiver to update status to read, and sender cannot update their own message
+      if (!message) {
+        console.log('[SOCKET] read_message ignored: message not found', { messageId, userId });
+        return;
+      }
+      if (message.receiver_id != userId) {
+        console.log('[SOCKET] read_message ignored: user is not receiver', { messageId, userId, receiver_id: message.receiver_id });
+        return;
+      }
+      if (message.sender_id == userId) {
+        console.log('[SOCKET] read_message BLOCKED: sender tried to update status to read', { messageId, userId, sender_id: message.sender_id });
+        return;
+      }
+      // Set viewed_at and msg_view_flag for view_once messages
+      if (message.delete_policy === 'view_once') {
+        if (!message.viewed_at) {
+          message.viewed_at = new Date();
+        }
+        if (message.msg_view_flag === '0') {
+          message.msg_view_flag = '1';
+        }
+      }
+      if (message.sender_id == userId) {
+         message.status = 'read';
+      }
+      await message.save();
+      // console.log('[SOCKET] stop_message_tone emit for read', messageId, 'to', message.receiver_id);
+      io.to(String(message.sender_id)).emit('message_read', {
+        messageId,
+        sender_id: message.sender_id,
+        receiver_id: message.receiver_id,
+        viewed_at: message.viewed_at,
+        delete_policy: message.delete_policy
+      });
+      io.to(String(message.receiver_id)).emit('message_read', {
+        messageId,
+        sender_id: message.sender_id,
+        receiver_id: message.receiver_id,
+        viewed_at: message.viewed_at,
+        delete_policy: message.delete_policy
+      });
+      // Stop message tone and clear unread for read
+      io.to(String(message.receiver_id)).emit('stop_message_tone', { messageId });
+      io.to(String(message.receiver_id)).emit('clear_unread', { from: message.sender_id });
     });
 
     // Handle message delete
     socket.on('delete_message', async ({ messageId, userId, forEveryone }) => {
       const message = await Message.findByPk(messageId);
       if (!message) return;
+      // Prevent deleting view_once messages from DB; treat like other types
       if (forEveryone) {
-        await message.destroy();
-        io.to(String(message.sender_id)).emit('message_deleted', { messageId });
-        io.to(String(message.receiver_id)).emit('message_deleted', { messageId });
+        if (message.delete_policy === 'view_once') {
+          // Do not destroy, just emit delete for everyone (optional: mark as deleted)
+          io.to(String(message.sender_id)).emit('message_deleted', { messageId });
+          io.to(String(message.receiver_id)).emit('message_deleted', { messageId });
+        } else {
+          await message.destroy();
+          io.to(String(message.sender_id)).emit('message_deleted', { messageId });
+          io.to(String(message.receiver_id)).emit('message_deleted', { messageId });
+        }
       } else {
         let deletedFor = message.deleted_for ? message.deleted_for.split(',') : [];
         if (!deletedFor.includes(String(userId))) {
@@ -133,11 +257,19 @@ module.exports = (io) => {
 
     // Handle message edit
     socket.on('edit_message', async ({ messageId, userId, content }) => {
+      // console.log('[edit_message] called', { messageId, userId, content });
       const message = await Message.findByPk(messageId);
-      if (!message) return;
-      if (message.sender_id !== userId) return;
+      if (!message) {
+        console.log('[edit_message] Message not found', { messageId });
+        return;
+      }
+      if (message.sender_id !== userId) {
+        // console.log('[edit_message] Sender mismatch', { sender_id: message.sender_id, userId });
+        return;
+      }
       message.content = content;
       await message.save();
+      // console.log('[edit_message] Message updated', { id: message.id, content: message.content });
       // Emit to both sender and receiver
       io.to(String(message.sender_id)).emit('message_edited', { message });
       io.to(String(message.receiver_id)).emit('message_edited', { message });
@@ -151,6 +283,10 @@ module.exports = (io) => {
     // ZEGOCLOUD call invite relay
     socket.on('call:invite', ({ from, to }) => {
         io.to(String(to)).emit('call:invite', { from, to });
+        // Play ringtone on receiver
+        io.to(String(to)).emit('play_call_ringtone', { from });
+        // Show incoming call popup on receiver
+        io.to(String(to)).emit('incoming_call_popup', { from, to });
     });
 
     // WebRTC signaling events for video/audio calls
@@ -160,12 +296,18 @@ module.exports = (io) => {
       socket.currentCallType = callType;
       socket.callStartedAt = new Date();
       socket.callAnswered = false;
+      // Play ringtone on receiver
+      io.to(String(to)).emit('play_call_ringtone', { from });
     });
 
     socket.on('call_answer', ({ to, from, answer }) => {
       io.to(String(to)).emit('call_answer', { from, answer });
       // Mark call as answered
       socket.callAnswered = true;
+      // Stop ringtone on receiver
+      io.to(String(to)).emit('stop_call_ringtone', { from });
+      // Hide incoming call popup
+      io.to(String(to)).emit('hide_incoming_call_popup', { from });
     });
 
     socket.on('ice_candidate', ({ to, from, candidate }) => {
@@ -190,6 +332,10 @@ module.exports = (io) => {
       }).catch(err => {
         console.error('Error saving missed call:', err);
       });
+      // Stop ringtone on receiver
+      io.to(String(to)).emit('stop_call_ringtone', { from });
+      // Hide incoming call popup
+      io.to(String(to)).emit('hide_incoming_call_popup', { from });
     });
 
     socket.on('call_end', ({ to, from, duration }) => {
@@ -213,11 +359,42 @@ module.exports = (io) => {
       }).catch(err => {
         console.error('Error saving call history:', err);
       });
+      // Stop ringtone on receiver
+      io.to(String(to)).emit('stop_call_ringtone', { from });
+      // Hide incoming call popup
+      io.to(String(to)).emit('hide_incoming_call_popup', { from });
     });
 
     // Incoming call notification
     socket.on('incoming_call', ({ to, from, callType }) => {
       io.to(String(to)).emit('incoming_call', { from, callType });
+    });
+
+    // --- Handle delete_view_once_messages ---
+    socket.on('delete_view_once_messages', async ({ messageIds, userId, otherUserId }) => {
+      // console.log('[SOCKET] Received delete_view_once_messages', { messageIds, userId, otherUserId });
+      if (!Array.isArray(messageIds) || !userId || !otherUserId) return;
+      for (const messageId of messageIds) {
+        const msg = await Message.findByPk(messageId);
+        if (
+          msg &&
+          msg.delete_policy === 'view_once' &&
+          msg.viewed_at &&
+          ((msg.receiver_id == userId && msg.sender_id == otherUserId) || (msg.sender_id == userId && msg.receiver_id == otherUserId))
+        ) {
+          // Do NOT delete view_once messages from DB anymore
+          // console.log('[SOCKET] Not deleting view_once message (policy updated)', messageId);
+          // Optionally emit an event if you want to update UI
+        } else {
+          console.log('[SOCKET] Not deleting message', messageId, {
+            found: !!msg,
+            delete_policy: msg?.delete_policy,
+            viewed_at: msg?.viewed_at,
+            sender_id: msg?.sender_id,
+            receiver_id: msg?.receiver_id
+          });
+        }
+      }
     });
 
     socket.on('disconnect', async () => {

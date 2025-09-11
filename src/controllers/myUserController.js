@@ -9,16 +9,17 @@ exports.getMyUsers = async (req, res) => {
     });
 
     // Get unread counts for each user
+    // Only count messages where the logged-in user is the receiver (not sender)
     const unreadCounts = await Message.findAll({
       where: {
         receiver_id: req.user.id,
-        status: 'sent' // Only messages not yet read
+        status: 'sent'
       },
       attributes: ['sender_id', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
       group: ['sender_id']
     });
 
-    // Map sender_id to count
+    // Map sender_id to count, only for users where req.user.id is receiver
     const unreadMap = {};
     unreadCounts.forEach(row => {
       unreadMap[row.sender_id] = row.dataValues.count;
@@ -45,20 +46,33 @@ exports.getMyUsers = async (req, res) => {
           ]
         },
         order: [['createdAt', 'DESC']],
-        attributes: ['content', 'createdAt']
+        attributes: ['content', 'createdAt', 'msg_view_flag']
       });
-      latestMessagesMap[mu.userId] = latestMsg
-        ? { content: latestMsg.content, createdAt: latestMsg.createdAt }
-        : { content: '', createdAt: null };
+      // Exclude latestMessage if msg_view_flag === '2'
+      if (latestMsg && latestMsg.msg_view_flag === '2') {
+        latestMessagesMap[mu.userId] = { content: '', createdAt: null };
+      } else if (latestMsg) {
+        latestMessagesMap[mu.userId] = { content: latestMsg.content, createdAt: latestMsg.createdAt };
+      } else {
+        latestMessagesMap[mu.userId] = { content: '', createdAt: null };
+      }
     }
 
     // Attach unread count and latest message info to each user
-    let result = myUsers.map(mu => ({
-      ...mu.User.toJSON(),
-      unread: unreadMap[mu.User.id] || 0,
-      latestMessage: latestMessagesMap[mu.userId]?.content || '',
-      latestMessageTime: latestMessagesMap[mu.userId]?.createdAt || null
-    }));
+    // Only show unread count for users where req.user.id is receiver (not sender)
+    let result = myUsers.map(mu => {
+      // Only receiver can have unread > 0. If logged-in user is sender, unread must be 0.
+      let unread = 0;
+      if (mu.User.id !== req.user.id) {
+        unread = unreadMap[mu.User.id] || 0;
+      }
+      return {
+        ...mu.User.toJSON(),
+        unread: unread,
+        latestMessage: latestMessagesMap[mu.userId]?.content || '',
+        latestMessageTime: latestMessagesMap[mu.userId]?.createdAt || null
+      };
+    });
 
     // Sort by latestMessageTime DESC (most recent first)
     result = result.sort((a, b) => {
@@ -67,6 +81,7 @@ exports.getMyUsers = async (req, res) => {
       if (!b.latestMessageTime) return -1;
       return new Date(b.latestMessageTime) - new Date(a.latestMessageTime);
     });
+
 
     res.json(result);
   } catch (err) {
