@@ -5,8 +5,52 @@ const BlockedUser = require('../models/blockedUser');
 module.exports = (io) => {
   // Robust online user tracking: userId -> Set of socket IDs
   const userSockets = new Map();
+
+  // Helper: Get latest message for a user pair, skipping expired view_once
+  async function getLatestMessageForUser(ownerId, userId) {
+    const { Op } = require('sequelize');
+    const msg = await Message.findOne({
+      where: {
+        [Op.or]: [
+          { sender_id: ownerId, receiver_id: userId },
+          { sender_id: userId, receiver_id: ownerId }
+        ],
+        // Exclude view_once messages with msg_view_flag = '2'
+        [Op.or]: [
+          { delete_policy: { [Op.ne]: 'view_once' } },
+          { delete_policy: 'view_once', msg_view_flag: { [Op.ne]: '2' } }
+        ]
+      },
+      order: [['createdAt', 'DESC']]
+    });
+    return msg;
+  }
+
+  // Emit online users (unchanged)
   function broadcastOnlineUsers() {
     io.emit('online_users', Array.from(userSockets.keys()));
+  }
+
+  // Emit user_list_updated with latestMessage for each myUser
+  async function emitUserListUpdated(userId) {
+    // Find all myUsers for this user
+    const myUsers = await MyUser.findAll({ where: { ownerId: userId } });
+    const result = [];
+    for (const mu of myUsers) {
+      const user = await require('../models/user').findByPk(mu.userId);
+      if (!user) continue;
+      const latestMsg = await getLatestMessageForUser(userId, mu.userId);
+      result.push({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        profile_image: user.profile_image,
+        status: user.status,
+        latestMessage: latestMsg ? latestMsg.content : '',
+        latestMessageTime: latestMsg ? latestMsg.createdAt : null
+      });
+    }
+    io.to(String(userId)).emit('user_list_updated', result);
   }
 
   // Store pending tone timeouts by messageId
@@ -33,6 +77,8 @@ module.exports = (io) => {
         }
       }
       io.to(String(userId)).emit('chat_cleared', { otherUserId });
+      // Refresh user list for this user so latestMessage is recalculated
+      emitUserListUpdated(userId);
     });
     // Store userId for this socket
     socket.on('join', async (userId) => {
@@ -67,7 +113,7 @@ module.exports = (io) => {
     });
 
     // Handle sending a message
-    socket.on('send_message', async (data) => {
+  socket.on('send_message', async (data) => {
       // Check if receiver has blocked sender
       const isBlocked = await BlockedUser.findOne({
         where: { blocker_id: data.receiver_id, blocked_id: data.sender_id }
@@ -122,18 +168,15 @@ module.exports = (io) => {
           const exists = await MyUser.findOne({ where: { ownerId: data.receiver_id, userId: data.sender_id } });
           if (!exists) {
             await MyUser.create({ ownerId: data.receiver_id, userId: data.sender_id });
-
-            // Emit event to receiver to refresh their user list
-            io.to(String(data.receiver_id)).emit('user_list_updated');
           }
         } catch (e) {
           console.error('Auto-add MyUser error (socket):', e);
         }
       }
 
-      // Emit user_list_updated to both sender and receiver for real-time sorting
-      io.to(String(data.receiver_id)).emit('user_list_updated');
-      io.to(String(data.sender_id)).emit('user_list_updated');
+      // Emit user_list_updated to both sender and receiver with correct latestMessage
+      emitUserListUpdated(data.receiver_id);
+      emitUserListUpdated(data.sender_id);
     });
 
     // Cancel pending tone if delivered or read quickly
@@ -176,40 +219,57 @@ module.exports = (io) => {
       }
     });
 
+
     socket.on('read_message', async ({ messageId, userId }) => {
-      if (pendingToneTimeouts.has(messageId)) {
-        clearTimeout(pendingToneTimeouts.get(messageId));
-        pendingToneTimeouts.delete(messageId);
-        console.log('[SOCKET] play_message_tone cancelled for read', messageId);
-      }
-      const message = await Message.findByPk(messageId);
-      // Only allow receiver to update status to read, and sender cannot update their own message
+
+      // const message = await Message.findByPk(messageId);
+         console.log('message fetched for read_message', userId, messageId);
+
+    const message = await Message.findByPk(messageId, {
+            where: { receiver_id: userId } // Assumes userId is a column in the Message model
+         })
+      //  console.log('message fetched for read_message old', userId, messageId, message ? 'found' : 'not found');
+       // rID is receiver_id from client, should match userId
+       // const rID = receiver_id;
+       //
+        // Only allow receiver to update status to read, and sender cannot update their own message
       if (!message) {
         console.log('[SOCKET] read_message ignored: message not found', { messageId, userId });
         return;
       }
+      if (message.sender_id == userId) {
+        // Sender is trying to update read status, block this
+        console.log('[SOCKET] read_message BLOCKED: sender tried to update status to read', { messageId, userId, sender_id: message.sender_id });
+        return;
+      }
       if (message.receiver_id != userId) {
+        // Not the receiver, block this
         console.log('[SOCKET] read_message ignored: user is not receiver', { messageId, userId, receiver_id: message.receiver_id });
         return;
       }
-      if (message.sender_id == userId) {
-        console.log('[SOCKET] read_message BLOCKED: sender tried to update status to read', { messageId, userId, sender_id: message.sender_id });
-        return;
+      if (pendingToneTimeouts.has(messageId)) {
+        clearTimeout(pendingToneTimeouts.get(messageId));
+        pendingToneTimeouts.delete(messageId);
+        console.log('[SOCKET] play_message_tone cancelled for read', messageId);
       }
       // Set viewed_at and msg_view_flag for view_once messages
       if (message.delete_policy === 'view_once') {
         if (!message.viewed_at) {
           message.viewed_at = new Date();
         }
-        if (message.msg_view_flag === '0') {
+        if (message.msg_view_flag === '0' && message.sender_id == userId) {
           message.msg_view_flag = '1';
         }
       }
-      if (message.sender_id == userId) {
+
+      // console.log('read_message called by receiver', userId);
+       if (message.msg_view_flag === '0' && message.receiver_id == userId) {
+        console.log('read_message called by receiver IN***', userId);
          message.status = 'read';
-      }
-      await message.save();
-      // console.log('[SOCKET] stop_message_tone emit for read', messageId, 'to', message.receiver_id);
+       }
+        await message.save();
+
+      
       io.to(String(message.sender_id)).emit('message_read', {
         messageId,
         sender_id: message.sender_id,
@@ -224,13 +284,12 @@ module.exports = (io) => {
         viewed_at: message.viewed_at,
         delete_policy: message.delete_policy
       });
-      // Stop message tone and clear unread for read
       io.to(String(message.receiver_id)).emit('stop_message_tone', { messageId });
       io.to(String(message.receiver_id)).emit('clear_unread', { from: message.sender_id });
     });
 
     // Handle message delete
-    socket.on('delete_message', async ({ messageId, userId, forEveryone }) => {
+  socket.on('delete_message', async ({ messageId, userId, forEveryone }) => {
       const message = await Message.findByPk(messageId);
       if (!message) return;
       // Prevent deleting view_once messages from DB; treat like other types
@@ -244,6 +303,9 @@ module.exports = (io) => {
           io.to(String(message.sender_id)).emit('message_deleted', { messageId });
           io.to(String(message.receiver_id)).emit('message_deleted', { messageId });
         }
+        // Update user lists for both users
+        emitUserListUpdated(message.sender_id);
+        emitUserListUpdated(message.receiver_id);
       } else {
         let deletedFor = message.deleted_for ? message.deleted_for.split(',') : [];
         if (!deletedFor.includes(String(userId))) {
@@ -252,6 +314,8 @@ module.exports = (io) => {
           await message.save();
         }
         io.to(String(userId)).emit('message_deleted', { messageId });
+        // Update user list for this user
+        emitUserListUpdated(userId);
       }
     });
 

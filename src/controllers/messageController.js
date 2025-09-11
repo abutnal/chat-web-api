@@ -18,6 +18,34 @@ exports.updateMsgViewFlag = async (req, res) => {
     // Only update 0->1 if any exist, otherwise update 1->2. Never both in one call.
     let updated0to1 = 0;
     let updated1to2 = 0;
+    let updated0to2 = 0;
+
+    const alreadyRead = await Message.count({
+      where: {
+        sender_id: userId,
+        receiver_id: receiverId,
+        delete_policy: 'view_once',
+        msg_view_flag: '0',
+        status: 'read'
+      }
+    });
+
+    if(alreadyRead > 0)
+      {
+      console.log('zeroCount IN first'); 
+      [updated0to2] = await Message.update(
+        { msg_view_flag: '2' },
+        {
+          where: {
+            sender_id: userId,
+            receiver_id: receiverId,
+            delete_policy: 'view_once',
+            msg_view_flag: '0'
+          }
+        }
+      );
+    }
+
     
     const oneToTwo = await Message.count({
       where: {
@@ -29,7 +57,7 @@ exports.updateMsgViewFlag = async (req, res) => {
     });
     if(oneToTwo > 0)
       {
-      console.log('zeroCount IN secound'); 
+      console.log('zeroCount IN first'); 
       [updated1to2] = await Message.update(
         { msg_view_flag: '2' },
         {
@@ -43,7 +71,6 @@ exports.updateMsgViewFlag = async (req, res) => {
       );
     }
    
-   
     const zeroToOne = await Message.count({
       where: {
         sender_id: userId,
@@ -52,13 +79,9 @@ exports.updateMsgViewFlag = async (req, res) => {
         msg_view_flag: '0'
       }
     });
-
-    
     
     if (zeroToOne > 0) {
-
-      console.log('zeroCount IN first'); 
-
+      console.log('zeroCount IN second'); 
       [updated0to1] = await Message.update(
         { msg_view_flag: '1' },
         {
@@ -71,7 +94,8 @@ exports.updateMsgViewFlag = async (req, res) => {
         }
       );
     } 
-    
+
+   
     
     
     res.json({ updated_0_to_1: updated0to1, updated_1_to_2: updated1to2 });
@@ -177,8 +201,14 @@ exports.getMessages = async (req, res) => {
 
     // Filter according to msg_view_flag and user role
     const filtered = allMessages.filter(msg => {
+      // Exclude if deleted_for includes current user
+      if (msg.deleted_for) {
+        const deletedForArr = msg.deleted_for.split(',').map(s => s.trim());
+        if (deletedForArr.includes(String(userA))) return false;
+      }
       if (msg.delete_policy !== 'view_once') return true;
       if (msg.msg_view_flag === '2') return false;
+      if (msg.delete_policy == 'view_once' && msg.status == 'read' && msg.msg_view_flag == '0') return false;
       // Sender: show if flag 0 or 1
       if (msg.sender_id === userA && msg.receiver_id === userB) {
         return msg.msg_view_flag === '0' || msg.msg_view_flag === '1';
@@ -248,7 +278,7 @@ exports.markAllAsRead = async (req, res) => {
     // userId is sender, req.user.id is receiver
     if (parseInt(userId) === req.user.id) {
       return res.status(403).json({ message: 'Sender cannot mark messages as read' });
-    }
+    }{
     // Extra defense: do not allow sender to update their own messages
     if (!req.user || !req.user.id) {
       return res.status(403).json({ message: 'Unauthorized' });
@@ -261,9 +291,10 @@ exports.markAllAsRead = async (req, res) => {
         receiver_id: req.user.id
       }
     });
-    if (!anyMsg) {
-      return res.status(404).json({ message: 'No messages found from this sender to you' });
-    }
+   
+    // if (!anyMsg) {
+    //   return res.status(404).json({ message: 'No messages found from this sender to you' });
+    // }
     // Update status to read for all messages
     const updated = await Message.update(
       { status: 'read' },
@@ -276,17 +307,19 @@ exports.markAllAsRead = async (req, res) => {
       }
     );
     // For view_once messages with msg_view_flag = 0, also set msg_view_flag = 1
-    await Message.update(
-      { msg_view_flag: '1' },
-      {
-        where: {
-          sender_id: userId,
-          receiver_id: req.user.id,
-          delete_policy: 'view_once',
-          msg_view_flag: '0'
-        }
-      }
-    );
+    // await Message.update(
+    //   { msg_view_flag: '1' },
+    //   {
+    //     where: {
+    //       sender_id: userId,
+    //       receiver_id: req.user.id,
+    //       delete_policy: 'view_once',
+    //       msg_view_flag: '0'
+    //     }
+    //   }
+    // );
+
+
     // Find all affected messages
     const messages = await Message.findAll({
       where: {
@@ -301,6 +334,8 @@ exports.markAllAsRead = async (req, res) => {
       io.to(String(msg.sender_id)).emit('message_read', { messageId: msg.id });
     });
     res.json({ success: true });
+  }
+
   } catch (err) {
     res.status(500).json({ message: 'Mark all as read failed', error: err.message });
   }

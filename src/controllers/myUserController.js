@@ -51,6 +51,10 @@ exports.getMyUsers = async (req, res) => {
       // Exclude latestMessage if msg_view_flag === '2'
       if (latestMsg && latestMsg.msg_view_flag === '2') {
         latestMessagesMap[mu.userId] = { content: '', createdAt: null };
+        // Emit socket event to notify client to refetch myUsers for real-time update
+        if (req.app && req.app.get('io')) {
+          req.app.get('io').to(`user_${req.user.id}`).emit('user_list_updated');
+        }
       } else if (latestMsg) {
         latestMessagesMap[mu.userId] = { content: latestMsg.content, createdAt: latestMsg.createdAt };
       } else {
