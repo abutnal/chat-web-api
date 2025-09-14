@@ -127,11 +127,13 @@ exports.sendMessage = async (req, res) => {
     });
 
     // Auto-add sender to receiver's list if not present
+    let myUserAdded = false;
     if (senderId !== receiver_id) {
       const exists = await MyUser.findOne({ where: { ownerId: receiver_id, userId: senderId } });
       if (!exists) {
         try {
           await MyUser.create({ ownerId: receiver_id, userId: senderId });
+          myUserAdded = true;
         } catch (e) {
           console.error('Auto-add MyUser error:', e);
         }
@@ -143,6 +145,10 @@ exports.sendMessage = async (req, res) => {
       const io = req.app.get('io');
       io.to(String(receiver_id)).emit('receive_message', message);
       io.to(String(req.user.id)).emit('receive_message', message);
+      // If MyUser was just added, emit user_list_updated to receiver
+      if (myUserAdded) {
+        io.to(`user_${receiver_id}`).emit('user_list_updated');
+      }
     } catch (e) {
       console.error('Socket emit error:', e);
     }

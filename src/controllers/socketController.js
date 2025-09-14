@@ -97,9 +97,9 @@ module.exports = (io) => {
           user.status = 'online';
           await user.save();
         }
-        // Emit user_list_updated to all clients
+        // Emit all_users_updated to all clients
         const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
-        io.emit('user_list_updated', users);
+        io.emit('all_users_updated', users);
       } catch (err) {
         console.error('Error setting user online on join:', err);
       }
@@ -163,20 +163,22 @@ module.exports = (io) => {
       }
 
       // Auto-add sender to receiver's list if not present
+      let myUserAdded = false;
       if (data.sender_id !== data.receiver_id) {
         try {
           const exists = await MyUser.findOne({ where: { ownerId: data.receiver_id, userId: data.sender_id } });
           if (!exists) {
             await MyUser.create({ ownerId: data.receiver_id, userId: data.sender_id });
+            myUserAdded = true;
           }
         } catch (e) {
           console.error('Auto-add MyUser error (socket):', e);
         }
       }
-
-      // Emit user_list_updated to both sender and receiver with correct latestMessage
-      emitUserListUpdated(data.receiver_id);
-      emitUserListUpdated(data.sender_id);
+      // Only emit user_list_updated if a new MyUser was added
+      if (myUserAdded) {
+        emitUserListUpdated(data.receiver_id);
+      }
     });
 
     // Cancel pending tone if delivered or read quickly
@@ -475,9 +477,9 @@ module.exports = (io) => {
               user.status = 'offline';
               await user.save();
             }
-            // Emit user_list_updated to all clients
+            // Emit all_users_updated to all clients
             const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
-            io.emit('user_list_updated', users);
+            io.emit('all_users_updated', users);
           } catch (err) {
             console.error('Error setting user offline on disconnect:', err);
           }

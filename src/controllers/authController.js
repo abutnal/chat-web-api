@@ -28,12 +28,12 @@ exports.signup = async (req, res) => {
     }
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, password: hash, profile_image });
-    // Emit user_list_updated event to all clients
+    // Emit all_users_updated event to all clients
     try {
       const io = req.app.get('io');
       if (io) {
         const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image'] });
-        io.emit('user_list_updated', users);
+        io.emit('all_users_updated', users);
       }
     } catch (e) {
       // Ignore socket errors
@@ -56,12 +56,12 @@ exports.login = async (req, res) => {
     user.status = 'online';
     await user.save();
     const token = jwt.sign({ id: user.id, email: user.email }, config.jwtSecret, { expiresIn: '1d' });
-    // Emit user_list_updated event to all clients for real-time update
+    // Emit all_users_updated event to all clients for real-time update
     try {
       const io = req.app.get('io');
       if (io) {
         const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
-        io.emit('user_list_updated', users);
+        io.emit('all_users_updated', users);
       }
     } catch (e) {
       // Ignore socket errors
@@ -79,12 +79,12 @@ exports.logout = async (req, res) => {
       if (user) {
         user.status = 'offline';
         await user.save();
-        // Emit user_list_updated event to all clients for real-time update
+        // Emit all_users_updated event to all clients for real-time update
         try {
           const io = req.app.get('io');
           if (io) {
             const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
-            io.emit('user_list_updated', users);
+            io.emit('all_users_updated', users);
           }
         } catch (e) {
           // Ignore socket errors

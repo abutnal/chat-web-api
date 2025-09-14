@@ -51,10 +51,6 @@ exports.getMyUsers = async (req, res) => {
       // Exclude latestMessage if msg_view_flag === '2'
       if (latestMsg && latestMsg.msg_view_flag === '2') {
         latestMessagesMap[mu.userId] = { content: '', createdAt: null };
-        // Emit socket event to notify client to refetch myUsers for real-time update
-        if (req.app && req.app.get('io')) {
-          req.app.get('io').to(`user_${req.user.id}`).emit('user_list_updated');
-        }
       } else if (latestMsg) {
         latestMessagesMap[mu.userId] = { content: latestMsg.content, createdAt: latestMsg.createdAt };
       } else {
@@ -74,7 +70,8 @@ exports.getMyUsers = async (req, res) => {
         ...mu.User.toJSON(),
         unread: unread,
         latestMessage: latestMessagesMap[mu.userId]?.content || '',
-        latestMessageTime: latestMessagesMap[mu.userId]?.createdAt || null
+        latestMessageTime: latestMessagesMap[mu.userId]?.createdAt || null,
+        delete_policy: mu.delete_policy || 'never',
       };
     });
 
@@ -89,6 +86,7 @@ exports.getMyUsers = async (req, res) => {
 
     res.json(result);
   } catch (err) {
+    console.error('getMyUsers error:', err);
     res.status(500).json({ message: 'Failed to fetch user list', error: err.message });
   }
 };
@@ -98,6 +96,11 @@ exports.addMyUser = async (req, res) => {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ message: 'userId required' });
     await MyUser.findOrCreate({ where: { ownerId: req.user.id, userId } });
+    // Emit user_list_updated to this user for real-time update
+    if (req.app && req.app.get('io')) {
+      const io = req.app.get('io');
+      io.to(String(req.user.id)).emit('user_list_updated');
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: 'Failed to add user', error: err.message });
@@ -109,8 +112,32 @@ exports.removeMyUser = async (req, res) => {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ message: 'userId required' });
     await MyUser.destroy({ where: { ownerId: req.user.id, userId } });
+    // Emit user_list_updated to this user for real-time update
+    if (req.app && req.app.get('io')) {
+      const io = req.app.get('io');
+      io.to(String(req.user.id)).emit('user_list_updated');
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: 'Failed to remove user', error: err.message });
+  }
+};
+
+// PATCH /my-users/:userId/delete-policy
+exports.updateDeletePolicy = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { delete_policy } = req.body;
+    console.log('updateDeletePolicy called with:', { userId, delete_policy });  
+    if (!['view_once', '24h', 'never'].includes(delete_policy)) {
+      return res.status(400).json({ message: 'Invalid delete_policy value' });
+    }
+    const myUser = await MyUser.findOne({ where: { ownerId: req.user.id, userId } });
+    if (!myUser) return res.status(404).json({ message: 'User not found in your list' });
+    myUser.delete_policy = delete_policy;
+    await myUser.save();
+    res.json({ success: true, delete_policy });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update delete_policy', error: err.message });
   }
 };
