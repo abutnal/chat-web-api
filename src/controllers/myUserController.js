@@ -61,16 +61,20 @@ exports.getMyUsers = async (req, res) => {
     // Attach unread count and latest message info to each user
     // Only show unread count for users where req.user.id is receiver (not sender)
     let result = myUsers.map(mu => {
-      // Only receiver can have unread > 0. If logged-in user is sender, unread must be 0.
+      // Always set unread to 0 if there are no messages
       let unread = 0;
+      // Only receiver can have unread > 0. If logged-in user is sender, unread must be 0.
       if (mu.User.id !== req.user.id) {
-        unread = unreadMap[mu.User.id] || 0;
+        unread = unreadMap[mu.User.id] ? parseInt(unreadMap[mu.User.id], 10) : 0;
       }
+      // If there is no latest message, force unread to 0
+      const latestMsgObj = latestMessagesMap[mu.userId] || { content: '', createdAt: null };
+      if (!latestMsgObj.content) unread = 0;
       return {
         ...mu.User.toJSON(),
         unread: unread,
-        latestMessage: latestMessagesMap[mu.userId]?.content || '',
-        latestMessageTime: latestMessagesMap[mu.userId]?.createdAt || null,
+        latestMessage: latestMsgObj.content,
+        latestMessageTime: latestMsgObj.createdAt,
         delete_policy: mu.delete_policy || 'never',
       };
     });
@@ -132,12 +136,22 @@ exports.updateDeletePolicy = async (req, res) => {
     if (!['view_once', '24h', 'never'].includes(delete_policy)) {
       return res.status(400).json({ message: 'Invalid delete_policy value' });
     }
-    const myUser = await MyUser.findOne({ where: { ownerId: req.user.id, userId } });
-    if (!myUser) return res.status(404).json({ message: 'User not found in your list' });
+    let myUser = await MyUser.findOne({ where: { ownerId: req.user.id, userId } });
+    if (!myUser) {
+      // If self-message (userId === req.user.id), create the row automatically
+      if (parseInt(userId) === parseInt(req.user.id)) {
+        myUser = await MyUser.create({ ownerId: req.user.id, userId, delete_policy });
+        res.json({ success: true, delete_policy });
+        return;
+      } else {
+        return res.status(404).json({ message: 'User not found in your list' });
+      }
+    }
     myUser.delete_policy = delete_policy;
     await myUser.save();
     res.json({ success: true, delete_policy });
   } catch (err) {
+    console.error('updateDeletePolicy error:', err);
     res.status(500).json({ message: 'Failed to update delete_policy', error: err.message });
   }
 };

@@ -1,3 +1,6 @@
+const { MyUser, Message } = require('../models');
+const { Op } = require('sequelize');
+
 // PATCH /api/messages/view-flag/:userId
 // Only receiver can call this. Updates msg_view_flag for all view_once messages in this chat:
 // - If msg_view_flag = 0, set to 1
@@ -6,108 +9,160 @@ exports.updateMsgViewFlag = async (req, res) => {
   try {
     const { userId } = req.params; // sender id
     const receiverId = req.user.id;
-    //  console.log('updateMsgViewFlag called by receiver', receiverId, 'for sender', userId);
-    // Restrict: Only receiver can call this, sender cannot update their own messages
+    // If sender and receiver are the same (self-message), allow update
     if (parseInt(userId) === parseInt(receiverId)) {
-      return res.status(403).json({ message: 'Sender cannot update msg_view_flag for their own messages' });
-    } else {
+      // Update all view_once messages where sender and receiver are the same
+      let updated0to1 = 0;
+      let updated1to2 = 0;
+      let updated0to2 = 0;
 
+      const alreadyRead = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '0',
+          status: 'read'
+        }
+      });
+      if(alreadyRead > 0) {
+        [updated0to2] = await Message.update(
+          { msg_view_flag: '2' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '0'
+            }
+          }
+        );
+      }
+      const oneToTwo = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '1'
+        }
+      });
+      if(oneToTwo > 0) {
+        [updated1to2] = await Message.update(
+          { msg_view_flag: '2' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '1'
+            }
+          }
+        );
+      }
+      const zeroToOne = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '0'
+        }
+      });
+      if (zeroToOne > 0) {
+        [updated0to1] = await Message.update(
+          { msg_view_flag: '1' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '0'
+            }
+          }
+        );
+      }
+      return res.json({ updated_0_to_1: updated0to1, updated_1_to_2: updated1to2 });
+    }
+    // ...existing code for normal sender/receiver...
+    if (parseInt(userId) !== parseInt(receiverId)) {
+      // ...existing code...
       console.log('updateMsgViewFlag called by sender', receiverId);
       console.log('updateMsgViewFlag called by reciever', userId);
-    // Update all view_once messages from sender to receiver
-    // Only update 0->1 if any exist, otherwise update 1->2. Never both in one call.
-    let updated0to1 = 0;
-    let updated1to2 = 0;
-    let updated0to2 = 0;
+      // Update all view_once messages from sender to receiver
+      // Only update 0->1 if any exist, otherwise update 1->2. Never both in one call.
+      let updated0to1 = 0;
+      let updated1to2 = 0;
+      let updated0to2 = 0;
 
-    const alreadyRead = await Message.count({
-      where: {
-        sender_id: userId,
-        receiver_id: receiverId,
-        delete_policy: 'view_once',
-        msg_view_flag: '0',
-        status: 'read'
-      }
-    });
-
-    if(alreadyRead > 0)
-      {
-      console.log('zeroCount IN first'); 
-      [updated0to2] = await Message.update(
-        { msg_view_flag: '2' },
-        {
-          where: {
-            sender_id: userId,
-            receiver_id: receiverId,
-            delete_policy: 'view_once',
-            msg_view_flag: '0'
-          }
+      const alreadyRead = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '0',
+          status: 'read'
         }
-      );
+      });
+      if(alreadyRead > 0) {
+        [updated0to2] = await Message.update(
+          { msg_view_flag: '2' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '0'
+            }
+          }
+        );
+      }
+      const oneToTwo = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '1'
+        }
+      });
+      if(oneToTwo > 0) {
+        [updated1to2] = await Message.update(
+          { msg_view_flag: '2' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '1'
+            }
+          }
+        );
+      }
+      const zeroToOne = await Message.count({
+        where: {
+          sender_id: userId,
+          receiver_id: receiverId,
+          delete_policy: 'view_once',
+          msg_view_flag: '0'
+        }
+      });
+      if (zeroToOne > 0) {
+        [updated0to1] = await Message.update(
+          { msg_view_flag: '1' },
+          {
+            where: {
+              sender_id: userId,
+              receiver_id: receiverId,
+              delete_policy: 'view_once',
+              msg_view_flag: '0'
+            }
+          }
+        );
+      }
+      return res.json({ updated_0_to_1: updated0to1, updated_1_to_2: updated1to2 });
     }
-
-    
-    const oneToTwo = await Message.count({
-      where: {
-        sender_id: userId,
-        receiver_id: receiverId,
-        delete_policy: 'view_once',
-        msg_view_flag: '1'
-      }
-    });
-    if(oneToTwo > 0)
-      {
-      console.log('zeroCount IN first'); 
-      [updated1to2] = await Message.update(
-        { msg_view_flag: '2' },
-        {
-          where: {
-            sender_id: userId,
-            receiver_id: receiverId,
-            delete_policy: 'view_once',
-            msg_view_flag: '1'
-          }
-        }
-      );
-    }
-   
-    const zeroToOne = await Message.count({
-      where: {
-        sender_id: userId,
-        receiver_id: receiverId,
-        delete_policy: 'view_once',
-        msg_view_flag: '0'
-      }
-    });
-    
-    if (zeroToOne > 0) {
-      console.log('zeroCount IN second'); 
-      [updated0to1] = await Message.update(
-        { msg_view_flag: '1' },
-        {
-          where: {
-            sender_id: userId,
-            receiver_id: receiverId,
-            delete_policy: 'view_once',
-            msg_view_flag: '0'
-          }
-        }
-      );
-    } 
-
-   
-    
-    
-    res.json({ updated_0_to_1: updated0to1, updated_1_to_2: updated1to2 });
-  
-  }
-  
   } catch (err) {
     res.status(500).json({ message: 'Update msg_view_flag failed', error: err.message });
   }
 };
-const { MyUser, Message } = require('../models');
-const { Op } = require('sequelize');
 
 exports.sendMessage = async (req, res) => {
   try {
@@ -116,11 +171,12 @@ exports.sendMessage = async (req, res) => {
     if (!receiver_id || !content) return res.status(400).json({ message: 'Message content required' });
 
     // Set sent_at to now, default delete_policy to 'never'
+    const isSelfMessage = senderId === receiver_id;
     const message = await Message.create({
       sender_id: senderId,
       receiver_id,
       content,
-      status: 'sent',
+      status: isSelfMessage ? 'read' : 'sent',
       delete_policy: delete_policy || 'never',
       sent_at: new Date(),
       replyToMessageId: replyToMessageId || null

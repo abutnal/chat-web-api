@@ -125,12 +125,13 @@ module.exports = (io) => {
       }
 
       // data: { sender_id, receiver_id, content, file_url }
+      const isSelf = data.sender_id === data.receiver_id;
       const message = await Message.create({
         sender_id: data.sender_id,
         receiver_id: data.receiver_id,
         content: data.content,
         file_url: data.file_url,
-        status: 'sent',
+        status: isSelf ? 'read' : 'sent',
         delete_policy: data.delete_policy || 'never',
         replyToMessageId: data.replyToMessageId || null,
       });
@@ -482,6 +483,34 @@ module.exports = (io) => {
             io.emit('all_users_updated', users);
           } catch (err) {
             console.error('Error setting user offline on disconnect:', err);
+          }
+        }
+        broadcastOnlineUsers();
+      }
+    });
+
+    // Handle leave event (manual logout/tab close)
+    socket.on('leave', async (userId) => {
+      if (!userId) return;
+      // Remove this socket from user's set
+      if (userSockets.has(userId)) {
+        const sockets = userSockets.get(userId);
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          userSockets.delete(userId);
+          // Set user status to offline in DB
+          try {
+            const User = require('../models/user');
+            const user = await User.findByPk(userId);
+            if (user) {
+              user.status = 'offline';
+              await user.save();
+            }
+            // Emit all_users_updated to all clients
+            const users = await User.findAll({ attributes: ['id', 'name', 'email', 'profile_image', 'status'] });
+            io.emit('all_users_updated', users);
+          } catch (err) {
+            console.error('Error setting user offline on leave:', err);
           }
         }
         broadcastOnlineUsers();
