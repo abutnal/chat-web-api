@@ -77,21 +77,28 @@ exports.getAllUsers = async (req, res) => {
 
 exports.searchUsers = async (req, res) => {
   try {
-    const { search = '', limit = 20, offset = 0 } = req.query;
-    const where = {};
+    // Support both 'search' and 'q' for compatibility
+    let { q = '', search = '', limit = 20, offset = 0 } = req.query;
+    const queryStr = search || q;
+    const where = {
+      id: { [Op.ne]: req.user.id } // Exclude current user
+    };
 
     // If searching for "online" or "offline", filter by status
-    if (search.toLowerCase() === 'online' || search.toLowerCase() === 'offline') {
-      where.status = search.toLowerCase();
-    } else if (search) {
-      where.name = { [Op.like]: `%${search}%` };
+    if (queryStr.toLowerCase() === 'online' || queryStr.toLowerCase() === 'offline') {
+      where.status = queryStr.toLowerCase();
+    } else if (queryStr) {
+      where[Op.or] = [
+        { name: { [Op.like]: `%${queryStr}%` } },
+        { email: { [Op.like]: `%${queryStr}%` } }
+      ];
     }
 
     const users = await User.findAll({
       where,
       limit: parseInt(limit),
       offset: parseInt(offset),
-      attributes: ['id', 'name', 'profile_image', 'status']
+      attributes: ['id', 'name', 'email', 'profile_image', 'status']
     });
     res.json(users);
   } catch (err) {

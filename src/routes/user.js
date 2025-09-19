@@ -5,7 +5,7 @@ const auth = require('../middleware/auth');
 
 
 router.get('/', auth, userController.getAllUsers);
-router.put('/profile', auth, require('../middleware/upload').single('profile_image'), userController.updateProfile);
+router.put('/', auth, require('../middleware/upload').single('profile_image'), userController.updateProfile);
 router.get('/search', auth, userController.searchUsers);
 
 router.post('/logout', async (req, res, next) => {

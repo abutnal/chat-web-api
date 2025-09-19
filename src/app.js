@@ -53,6 +53,10 @@ app.use('/api/calls', callRoutes);
 app.use('/api/xirsys', xirsysRoutes);
 app.use('/api', blockedUserRoutes);
 
+
+// Swagger API docs
+require('./swagger')(app);
+
 // Error handler
 app.use((err, req, res, next) => {
   res.status(500).json({ message: err.message || 'Server error' });

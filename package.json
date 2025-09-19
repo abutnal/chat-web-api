@@ -19,7 +19,9 @@
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.14.3",
     "sequelize": "^6.35.1",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

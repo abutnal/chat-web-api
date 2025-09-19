@@ -1,0 +1,520 @@
+openapi: 3.0.0
+info:
+  title: Chat Web API
+  version: 1.0.0
+  description: API documentation for the chat-web-api backend (all endpoints, public docs)
+servers:
+  - url: https://chat-web-api.onrender.com
+  - url: http://localhost:8000
+  - url: http://192.168.29.207:8000
+paths:
+  /api/auth/login:
+    post:
+      summary: User login
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Invalid credentials
+
+  /api/auth/signup:
+    post:
+      summary: User signup
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                profile_image:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Signup successful
+        '400':
+          description: Invalid input
+
+  /api/users:
+    get:
+      summary: Get all users
+      tags: [User]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of users
+    put:
+      summary: Update user profile
+      tags: [User]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                profile_image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Profile updated
+
+  /api/users/logout:
+    post:
+      summary: Logout user (explicit)
+      tags: [User]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+  /api/users/search:
+    get:
+      summary: Search users
+      tags: [User]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          required: false
+          description: Search query (legacy, use 'search' for new clients)
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+          description: Search query (preferred)
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          required: false
+          description: Max results to return (default 20)
+        - in: query
+          name: offset
+          schema:
+            type: integer
+          required: false
+          description: Offset for pagination (default 0)
+      responses:
+        '200':
+          description: List of matching users
+  /api/users/change-password:
+    post:
+      summary: Change password
+      tags: [User]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                oldPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password changed
+
+  /api/messages/send:
+    post:
+      summary: Send a message
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                  receiver_id:
+                    type: integer
+                  content:
+                    type: string
+                  file_url:
+                    type: string
+                  delete_policy:
+                    type: string
+                    enum: [view_once, 24h, never]
+                    default: never
+                  viewed_at:
+                    type: string
+                    format: date-time
+                  sent_at:
+                    type: string
+                    format: date-time
+                  status:
+                    type: string
+                    enum: [sent, delivered, read]
+                    default: sent
+                  deleted_for:
+                    type: string
+                    description: comma-separated user ids
+                  replyToMessageId:
+                    type: integer
+                    nullable: true
+                  msg_view_flag:
+                    type: string
+                    enum: ['0', '1', '2']
+                    default: '0'
+                    description: '0=not viewed, 1=viewed, 2=expired for view_once'
+      responses:
+        '201':
+          description: Message sent
+  /api/messages/{userId}:
+    get:
+      summary: Get messages with a user
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of messages
+  /api/messages/{messageId}:
+    patch:
+      summary: Edit a message
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Message edited
+    delete:
+      summary: Delete a message
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                forEveryone:
+                  type: boolean
+                  description: 'If true, delete for everyone (only sender can do this). If false or omitted, delete for current user only.'
+      responses:
+        '200':
+          description: Message deleted (for me or for everyone)
+        '403':
+          description: Only sender can delete for everyone
+        '404':
+          description: Message not found
+  /api/messages/{messageId}/read:
+    patch:
+      summary: Mark message as read
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Message marked as read
+  /api/messages/mark-all-read/{userId}:
+    post:
+      summary: Mark all messages as read for a user
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: All messages marked as read
+  /api/messages/view-flag/{userId}:
+    patch:
+      summary: Update message view flag for a user
+      tags: [Message]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                view_flag:
+                  type: string
+      responses:
+        '200':
+          description: View flag updated
+
+  /api/my-users:
+    get:
+      summary: Get my user list
+      tags: [MyUser]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of my users
+  /api/my-users/add:
+    post:
+      summary: Add user to my list
+      tags: [MyUser]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: integer
+      responses:
+        '201':
+          description: User added
+  /api/my-users/remove:
+    post:
+      summary: Remove user from my list
+      tags: [MyUser]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: integer
+      responses:
+        '200':
+          description: User removed
+  /api/my-users/{userId}/delete-policy:
+    patch:
+      summary: Update delete policy for a user
+      tags: [MyUser]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delete_policy:
+                  type: string
+      responses:
+        '200':
+          description: Delete policy updated
+
+  /api/calls:
+    post:
+      summary: Save a call record
+      tags: [Call]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: integer
+                callType:
+                  type: string
+                duration:
+                  type: integer
+      responses:
+        '201':
+          description: Call saved
+  /api/calls/history/{userId}:
+    get:
+      summary: Get call history for a user
+      tags: [Call]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Call history
+
+  /api/blocked-users:
+    get:
+      summary: Get blocked users
+      tags: [BlockedUser]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of blocked users
+  /api/block-user:
+    post:
+      summary: Block a user
+      tags: [BlockedUser]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                blocked_id:
+                  type: integer
+                  description: ID of the user to block
+      responses:
+        '200':
+          description: User blocked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+  /api/unblock-user:
+    post:
+      summary: Unblock a user
+      tags: [BlockedUser]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                blocked_id:
+                  type: integer
+                  description: ID of the user to unblock
+      responses:
+        '200':
+          description: User unblocked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/upload:
+    post:
+      summary: Upload a file
+      tags: [Upload]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File uploaded
+
+
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
